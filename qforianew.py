@@ -503,18 +503,49 @@ if url_input:
                         st.markdown(f"**Source:** {metadata['url']}")
                         st.text_area("Content Preview", content[:1000] + "..." if len(content) > 1000 else content, height=200, disabled=True)
                     
-                    # Auto-analyze content
-                    with st.spinner("🧠 Performing AI analysis..."):
-                        # Analyze content structure
+                    # Show immediate results first, then offer analysis
+                    st.info("✅ Content scraped successfully! Click 'Analyze Content' below for AI enhancement suggestions.")
+                    
+                    # Immediate data extraction (fast)
+                    data_points = extract_data_points(content)
+                    if data_points:
+                        st.subheader("📊 Quick Data Points Found")
+                        for dp in data_points[:5]:  # Show first 5 quickly
+                            st.markdown(f"• **{dp['value']}** ({dp['type']}): {dp['description'][:100]}...")
+                    
+                    # Offer detailed analysis as separate action
+                    if st.button("🧠 Perform AI Analysis", type="secondary", help="Get detailed AI enhancement suggestions"):
+                        # Progress tracking like original Qforia
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+                        
+                        # Step 1: Structure Analysis
+                        status_text.text("🔍 Analyzing content structure...")
+                        progress_bar.progress(25)
+                        
                         analysis = analyze_content_structure(content)
                         
                         if analysis:
                             st.session_state.content_analysis = analysis
+                            progress_bar.progress(50)
                             
-                            # Generate enhancement suggestions
+                            # Step 2: Enhancement suggestions
+                            status_text.text("💡 Generating enhancement suggestions...")
+                            progress_bar.progress(75)
+                            
                             suggestions = generate_enhancement_suggestions(content, analysis)
                             if suggestions:
                                 st.session_state.enhancement_suggestions = suggestions
+                                progress_bar.progress(100)
+                                status_text.text("✅ Analysis complete!")
+                                
+                                # Clear progress after 2 seconds
+                                time.sleep(1)
+                                progress_bar.empty()
+                                status_text.empty()
+                                
+                                st.success("🎉 AI analysis completed! Scroll down to see enhancement suggestions.")
+                                st.rerun()
                 
                 else:
                     st.error(f"❌ Failed to scrape content: {error}")
@@ -537,6 +568,7 @@ if 'show_manual_input' in st.session_state or (url_input and use_fallback):
     )
     
     if st.button("📊 Analyze Pasted Content", type="secondary") and fallback_content:
+        # Immediate processing like original Qforia
         st.session_state.scraped_content = fallback_content
         st.session_state.content_metadata = {
             'word_count': len(fallback_content.split()),
@@ -546,173 +578,182 @@ if 'show_manual_input' in st.session_state or (url_input and use_fallback):
             'scraped_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
         
-        # Auto-analyze pasted content
-        with st.spinner("🧠 Analyzing content..."):
+        # Quick data extraction (immediate)
+        data_points = extract_data_points(fallback_content)
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Word Count", len(fallback_content.split()))
+        with col2:
+            st.metric("Data Points", len(data_points))
+        with col3:
+            st.metric("Status", "✅ Ready")
+        
+        st.success("✅ Content processed! Use 'Perform AI Analysis' button below for detailed suggestions.")
+        
+        if data_points:
+            st.subheader("📊 Quick Data Points Found")
+            for dp in data_points[:5]:
+                st.markdown(f"• **{dp['value']}** ({dp['type']})")
+        
+        # Separate AI analysis button
+        if st.button("🧠 Perform Detailed AI Analysis", type="secondary"):
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            status_text.text("🔍 Analyzing content structure...")
+            progress_bar.progress(33)
+            
             analysis = analyze_content_structure(fallback_content)
             if analysis:
                 st.session_state.content_analysis = analysis
+                progress_bar.progress(66)
+                
+                status_text.text("💡 Generating enhancement suggestions...")
                 suggestions = generate_enhancement_suggestions(fallback_content, analysis)
                 if suggestions:
                     st.session_state.enhancement_suggestions = suggestions
-        
-        st.success("✅ Content analyzed!")
+                    progress_bar.progress(100)
+                    status_text.text("✅ Analysis complete!")
+                    
+                    time.sleep(1)
+                    progress_bar.empty()
+                    status_text.empty()
+                    st.rerun()
 
 # Display Analysis Results
 if 'content_analysis' in st.session_state and st.session_state.content_analysis:
     st.markdown("---")
-    st.header("📊 Content Analysis Results")
+    st.header("📊 AI Content Analysis Results")
     
     analysis = st.session_state.content_analysis
     
-    # Content Metrics Overview
-    col1, col2, col3 = st.columns(3)
+    # Show analysis completion metrics like original Qforia
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Analysis", "✅ Complete")
+    with col2:
+        st.metric("Content Type", analysis.get('content_type', 'N/A'))
+    with col3:
+        st.metric("Readability", analysis.get('readability_level', 'N/A'))
+    with col4:
+        st.metric("Topics Found", len(analysis.get('main_topics', [])))
+    
+    # Quick overview - no heavy processing
+    col1, col2 = st.columns(2)
     
     with col1:
-        st.markdown("**📈 Content Metrics**")
-        metrics_df = pd.DataFrame([
-            {"Metric": "Content Type", "Value": analysis.get('content_type', 'N/A')},
-            {"Metric": "Tone", "Value": analysis.get('tone', 'N/A')},
-            {"Metric": "Target Audience", "Value": analysis.get('target_audience', 'N/A')},
-            {"Metric": "Readability", "Value": analysis.get('readability_level', 'N/A')}
-        ])
-        st.dataframe(metrics_df, hide_index=True, use_container_width=True)
-    
-    with col2:
         st.markdown("**📝 Main Topics**")
         topics = analysis.get('main_topics', [])
         for i, topic in enumerate(topics[:5], 1):
             st.markdown(f"{i}. {topic}")
     
-    with col3:
-        st.markdown("**🎯 Key Sections**")
-        sections = analysis.get('key_sections', [])
-        for section in sections[:3]:
-            st.markdown(f"• {section}")
+    with col2:
+        st.markdown("**🎯 Content Strengths**")
+        strengths = analysis.get('strengths', [])
+        for strength in strengths[:3]:
+            st.markdown(f"✅ {strength}")
 
-# Display Enhancement Suggestions
+# Display Enhancement Suggestions (only if generated)
 if 'enhancement_suggestions' in st.session_state and st.session_state.enhancement_suggestions:
     st.markdown("---")
     st.header("🚀 AI Enhancement Suggestions")
     
     suggestions = st.session_state.enhancement_suggestions
     
+    # Quick metrics like original Qforia style
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        missing_count = len(suggestions.get('missing_data_points', []))
+        st.metric("Missing Data", missing_count)
+    with col2:
+        expansion_count = len(suggestions.get('topic_expansions', []))
+        st.metric("Expansions", expansion_count)
+    with col3:
+        improvement_count = len(suggestions.get('content_improvements', []))
+        st.metric("Improvements", improvement_count)
+    with col4:
+        seo_count = len(suggestions.get('seo_enhancements', []))
+        st.metric("SEO Fixes", seo_count)
+    
+    # Show suggestions in expandable format for faster loading
     # Missing Data Points
     missing_data = suggestions.get('missing_data_points', [])
     if missing_data:
-        st.subheader("📊 Missing Data Points")
-        for data_point in missing_data:
-            priority_color = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(data_point.get('priority', 'medium'), "🟡")
-            st.markdown(f"""
-            <div class="enhancement-suggestion">
-                <strong>{priority_color} {data_point.get('category', 'Data Point')}</strong><br>
-                <strong>Suggestion:</strong> {data_point.get('suggestion', '')}<br>
-                <strong>Example:</strong> {data_point.get('example', '')}<br>
-                <strong>Why:</strong> {data_point.get('reasoning', '')}
-            </div>
-            """, unsafe_allow_html=True)
+        with st.expander(f"📊 Missing Data Points ({len(missing_data)})", expanded=True):
+            for i, data_point in enumerate(missing_data[:3]):  # Show first 3 by default
+                priority_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(data_point.get('priority', 'medium'), "🟡")
+                st.markdown(f"""
+                **{priority_emoji} {data_point.get('category', 'Data Point')}**  
+                💡 {data_point.get('suggestion', '')}  
+                📝 Example: {data_point.get('example', '')}
+                """)
+            
+            if len(missing_data) > 3:
+                if st.button(f"Show {len(missing_data) - 3} more data points"):
+                    for data_point in missing_data[3:]:
+                        priority_emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(data_point.get('priority', 'medium'), "🟡")
+                        st.markdown(f"""
+                        **{priority_emoji} {data_point.get('category', 'Data Point')}**  
+                        💡 {data_point.get('suggestion', '')}  
+                        📝 Example: {data_point.get('example', '')}
+                        """)
     
     # Topic Expansions
     topic_expansions = suggestions.get('topic_expansions', [])
     if topic_expansions:
-        st.subheader("📈 Topic Expansion Opportunities")
-        for expansion in topic_expansions:
-            current_coverage = expansion.get('current_coverage', 'unknown')
-            coverage_emoji = {"brief": "📝", "moderate": "📄", "detailed": "📚"}.get(current_coverage, "📝")
-            
-            st.markdown(f"""
-            <div class="content-analysis">
-                <strong>{coverage_emoji} Topic: {expansion.get('topic', '')}</strong><br>
-                <strong>Current Coverage:</strong> {current_coverage}<br>
-                <strong>Suggested Additions:</strong>
-            """, unsafe_allow_html=True)
-            
-            additions = expansion.get('suggested_additions', [])
-            for addition in additions:
-                st.markdown(f"• {addition}")
-            
-            st.markdown("</div>", unsafe_allow_html=True)
+        with st.expander(f"📈 Topic Expansion Opportunities ({len(topic_expansions)})"):
+            for expansion in topic_expansions:
+                coverage_emoji = {"brief": "📝", "moderate": "📄", "detailed": "📚"}.get(expansion.get('current_coverage', 'unknown'), "📝")
+                st.markdown(f"""
+                **{coverage_emoji} {expansion.get('topic', '')}** ({expansion.get('current_coverage', 'unknown')} coverage)
+                """)
+                additions = expansion.get('suggested_additions', [])
+                for addition in additions[:2]:  # Show first 2
+                    st.markdown(f"• {addition}")
     
-    # Export Enhancement Report
-    st.subheader("📤 Export Enhancement Report")
-    
-    # Create comprehensive report
-    enhancement_report = {
-        'content_metadata': st.session_state.content_metadata,
-        'analysis': st.session_state.content_analysis,
-        'suggestions': st.session_state.enhancement_suggestions,
-        'generated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    }
-    
-    col1, col2, col3 = st.columns(3)
+    # Quick export options (like original Qforia)
+    st.subheader("📤 Quick Export")
+    col1, col2 = st.columns(2)
     
     with col1:
-        # JSON Export
-        report_json = json.dumps(enhancement_report, indent=2, default=str)
+        # Simple summary export
+        summary = f"""Content Analysis Summary
+Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}
+Source: {st.session_state.content_metadata.get('url', 'Manual Input')}
+
+Missing Data Points: {len(missing_data)}
+Topic Expansions: {len(topic_expansions)}
+Content Improvements: {len(suggestions.get('content_improvements', []))}
+SEO Enhancements: {len(suggestions.get('seo_enhancements', []))}
+
+Top 3 Missing Data Points:
+"""
+        for i, dp in enumerate(missing_data[:3], 1):
+            summary += f"{i}. {dp.get('suggestion', '')} - {dp.get('example', '')}\n"
+        
         st.download_button(
-            "📋 Download Analysis JSON",
-            data=report_json,
-            file_name=f"content_analysis_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
-            mime="application/json"
+            "📋 Quick Summary",
+            data=summary,
+            file_name=f"content_summary_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
+            mime="text/plain"
         )
     
     with col2:
-        # CSV Export for data points
-        export_data = []
-        for suggestion_type, suggestions_list in enhancement_report['suggestions'].items():
-            if isinstance(suggestions_list, list):
-                for item in suggestions_list:
-                    if isinstance(item, dict):
-                        export_data.append({
-                            'Type': suggestion_type,
-                            'Category': item.get('category', item.get('area', item.get('type', 'N/A'))),
-                            'Suggestion': item.get('suggestion', item.get('improvement', item.get('topic', 'N/A'))),
-                            'Priority': item.get('priority', 'N/A'),
-                            'Implementation': item.get('implementation', item.get('reasoning', 'N/A'))
-                        })
+        # JSON export for full data
+        enhancement_report = {
+            'content_metadata': st.session_state.content_metadata,
+            'analysis': st.session_state.content_analysis,
+            'suggestions': st.session_state.enhancement_suggestions,
+            'generated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
         
-        if export_data:
-            export_df = pd.DataFrame(export_data)
-            csv_data = export_df.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                "📊 Download Suggestions CSV",
-                data=csv_data,
-                file_name=f"enhancement_suggestions_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                mime="text/csv"
-            )
-    
-    with col3:
-        # Content Brief
-        brief = f"""# Content Enhancement Brief
-
-**Original Source:** {enhancement_report['content_metadata']['url']}
-**Analysis Date:** {enhancement_report['generated_at']}
-**Word Count:** {enhancement_report['content_metadata']['word_count']}
-
-## Content Analysis Summary
-
-**Content Type:** {enhancement_report['analysis'].get('content_type', 'N/A')}
-**Target Audience:** {enhancement_report['analysis'].get('target_audience', 'N/A')}
-**Tone:** {enhancement_report['analysis'].get('tone', 'N/A')}
-
-## Key Enhancement Opportunities
-
-### High-Priority Data Points to Add
-"""
-        
-        # Add missing data points
-        for data_point in enhancement_report['suggestions'].get('missing_data_points', []):
-            if data_point.get('priority') == 'high':
-                brief += f"- {data_point.get('suggestion', '')}: {data_point.get('example', '')}\n"
-        
-        brief += "\n### Topics to Expand\n"
-        for expansion in enhancement_report['suggestions'].get('topic_expansions', []):
-            brief += f"- **{expansion.get('topic', '')}**: Currently {expansion.get('current_coverage', 'unknown')} coverage\n"
-        
+        report_json = json.dumps(enhancement_report, indent=2, default=str)
         st.download_button(
-            "📝 Enhancement Brief",
-            data=brief,
-            file_name=f"enhancement_brief_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
-            mime="text/markdown"
+            "📋 Full Report JSON",
+            data=report_json,
+            file_name=f"content_analysis_{datetime.now().strftime('%Y%m%d_%H%M')}.json",
+            mime="application/json"
         )
 
 # ========================================
