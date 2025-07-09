@@ -25,17 +25,40 @@ if 'url_analysis' not in st.session_state:
 if 'enhanced_topics' not in st.session_state:
     st.session_state.enhanced_topics = []
 
-# Sidebar Configuration
-st.sidebar.header("🔧 Configuration")
-gemini_key = st.sidebar.text_input("Gemini API Key", type="password")
-perplexity_key = st.sidebar.text_input("Perplexity API Key", type="password")
-
-# Configure Gemini
-if gemini_key:
+# API Configuration using Streamlit secrets
+try:
+    gemini_key = st.secrets["GEMINI_API_KEY"]
+    perplexity_key = st.secrets["PERPLEXITY_API_KEY"]
+    
+    # Configure Gemini
     genai.configure(api_key=gemini_key)
     model = genai.GenerativeModel("gemini-1.5-flash-latest")
-else:
-    model = None
+    
+    # Show configuration status in sidebar
+    st.sidebar.header("🔧 Configuration Status")
+    st.sidebar.success("✅ Gemini API Key: Configured")
+    st.sidebar.success("✅ Perplexity API Key: Configured")
+    
+except KeyError as e:
+    st.sidebar.header("🔧 Configuration")
+    st.sidebar.error(f"❌ Missing API key in secrets: {e}")
+    st.sidebar.info("Please add the following to your Streamlit secrets:")
+    st.sidebar.code('''
+[secrets]
+GEMINI_API_KEY = "your_gemini_key_here"
+PERPLEXITY_API_KEY = "your_perplexity_key_here"
+    ''')
+    
+    # Fallback to manual input
+    st.sidebar.subheader("Manual Input (Fallback)")
+    gemini_key = st.sidebar.text_input("Gemini API Key", type="password")
+    perplexity_key = st.sidebar.text_input("Perplexity API Key", type="password")
+    
+    if gemini_key:
+        genai.configure(api_key=gemini_key)
+        model = genai.GenerativeModel("gemini-1.5-flash-latest")
+    else:
+        model = None
 
 # Utility Functions
 def call_perplexity(query, system_prompt="Provide comprehensive, actionable insights with specific data points, statistics, and practical recommendations."):
@@ -237,8 +260,8 @@ with tab1:
         if st.button("🚀 Generate Research Queries", type="primary", use_container_width=True):
             if not user_query.strip():
                 st.warning("Please enter a research query")
-            elif not gemini_key:
-                st.warning("Please enter your Gemini API key")
+            elif not model:
+                st.warning("Please configure your API keys in Streamlit secrets")
             else:
                 with st.spinner("🤖 Generating comprehensive research queries..."):
                     results = generate_fanout(user_query, mode)
@@ -379,8 +402,8 @@ with tab2:
         if st.button("🔍 Analyze URL", type="primary", use_container_width=True):
             if not url:
                 st.warning("Please enter a URL")
-            elif not gemini_key:
-                st.warning("Please enter your Gemini API key")
+            elif not model:
+                st.warning("Please configure your API keys in Streamlit secrets")
             else:
                 with st.spinner("🌐 Scraping and analyzing URL content..."):
                     scraped_data, error = scrape_url(url)
