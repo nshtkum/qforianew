@@ -271,44 +271,52 @@ def call_perplexity_api(query):
             "Content-Type": "application/json"
         }
         
-        data = {
-            "model": "llama-3.1-sonar-large-128k-online",
-            "messages": [
-                {
-                    "role": "system", 
-                    "content": "You are a helpful research assistant. Provide detailed, factual information with specific numbers, statistics, and recent data where available. Include sources when possible."
-                },
-                {"role": "user", "content": query}
-            ],
-            "temperature": 0.2,
-            "max_tokens": 1000
-        }
+        # Updated model names as per Perplexity API documentation
+        models_to_try = [
+            "llama-3.1-sonar-huge-128k-online",
+            "llama-3.1-sonar-large-128k-online", 
+            "llama-3.1-70b-instruct",
+            "mixtral-8x7b-instruct"
+        ]
         
-        response = requests.post(
-            "https://api.perplexity.ai/chat/completions", 
-            headers=headers, 
-            json=data, 
-            timeout=30
-        )
-        
-        if response.status_code == 200:
-            st.session_state.api_usage['perplexity_calls'] += 1
-            return response.json()
-        else:
-            # Try alternative model
-            data["model"] = "llama-3.1-sonar-small-128k-online"
-            response = requests.post(
-                "https://api.perplexity.ai/chat/completions", 
-                headers=headers, 
-                json=data, 
-                timeout=30
-            )
+        for model_name in models_to_try:
+            data = {
+                "model": model_name,
+                "messages": [
+                    {
+                        "role": "system", 
+                        "content": "You are a helpful research assistant. Provide detailed, factual information with specific numbers, statistics, and recent data where available. Include sources when possible."
+                    },
+                    {"role": "user", "content": query}
+                ],
+                "temperature": 0.2,
+                "max_tokens": 1000
+            }
             
-            if response.status_code == 200:
-                st.session_state.api_usage['perplexity_calls'] += 1
-                return response.json()
-            else:
-                return {"error": f"API call failed with status {response.status_code}: {response.text}"}
+            try:
+                response = requests.post(
+                    "https://api.perplexity.ai/chat/completions", 
+                    headers=headers, 
+                    json=data, 
+                    timeout=30
+                )
+                
+                if response.status_code == 200:
+                    st.session_state.api_usage['perplexity_calls'] += 1
+                    return response.json()
+                elif response.status_code == 400:
+                    # Model not available, try next one
+                    continue
+                else:
+                    # Other error, return immediately
+                    return {"error": f"API call failed with status {response.status_code}: {response.text}"}
+                    
+            except requests.exceptions.RequestException as e:
+                if model_name == models_to_try[-1]:  # Last model
+                    return {"error": f"Request failed: {str(e)}"}
+                continue
+        
+        return {"error": "All models failed or are unavailable"}
     
     except Exception as e:
         return {"error": f"Exception occurred: {str(e)}"}
