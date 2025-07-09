@@ -127,7 +127,7 @@ def get_api_keys():
     except Exception as e:
         st.sidebar.info("🔑 Enter API keys manually")
         gemini_key = st.sidebar.text_input("Gemini API Key", type="password", help="Enter your Google Gemini API key")
-        perplexity_key = st.sidebar.text_input("Perplexity API Key", type="password", help="Enter your Perplexity API key")
+        perplexity_key = st.sidebar.text_input("Perplexity API Key", type="password", help="Enter your Perplexity API key (starts with 'pplx-')")
         
         # Validate keys
         keys_valid = True
@@ -138,7 +138,61 @@ def get_api_keys():
             st.sidebar.warning("⚠️ Gemini API key required")
             keys_valid = False
             
+        # Add API key tester
+        if perplexity_key and perplexity_key.startswith('pplx-'):
+            if st.sidebar.button("🧪 Test Perplexity API"):
+                test_result = test_perplexity_api(perplexity_key)
+                if test_result["success"]:
+                    st.sidebar.success(f"✅ Perplexity API working! Model: {test_result['model']}")
+                else:
+                    st.sidebar.error(f"❌ Perplexity API test failed: {test_result['error']}")
+            
         return gemini_key, perplexity_key, keys_valid
+
+def test_perplexity_api(api_key):
+    """Test Perplexity API with a simple query"""
+    try:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # Try the most basic models first
+        test_models = [
+            "llama-3.1-sonar-small-128k-online",
+            "llama-3.1-8b-instruct",
+            "mixtral-8x7b-instruct"
+        ]
+        
+        for model in test_models:
+            data = {
+                "model": model,
+                "messages": [{"role": "user", "content": "What is 2+2?"}],
+                "max_tokens": 50
+            }
+            
+            try:
+                response = requests.post(
+                    "https://api.perplexity.ai/chat/completions",
+                    headers=headers,
+                    json=data,
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    return {"success": True, "model": model}
+                elif response.status_code == 401:
+                    return {"success": False, "error": "Invalid API key"}
+                elif response.status_code == 429:
+                    return {"success": False, "error": "Rate limit exceeded"}
+                    
+            except requests.exceptions.RequestException:
+                continue
+                
+        return {"success": False, "error": "All test models failed"}
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 gemini_key, perplexity_key, api_keys_valid = get_api_keys()
 
@@ -271,26 +325,29 @@ def call_perplexity_api(query):
             "Content-Type": "application/json"
         }
         
-        # Updated model names as per Perplexity API documentation
+        # Updated model names based on current Perplexity API (2024)
         models_to_try = [
-            "llama-3.1-sonar-huge-128k-online",
-            "llama-3.1-sonar-large-128k-online", 
+            "llama-3.1-sonar-large-128k-online",
+            "llama-3.1-sonar-small-128k-online", 
             "llama-3.1-70b-instruct",
+            "llama-3.1-8b-instruct",
             "mixtral-8x7b-instruct"
         ]
         
-        for model_name in models_to_try:
+        last_error = None
+        
+        for i, model_name in enumerate(models_to_try):
             data = {
                 "model": model_name,
                 "messages": [
                     {
                         "role": "system", 
-                        "content": "You are a helpful research assistant. Provide detailed, factual information with specific numbers, statistics, and recent data where available. Include sources when possible."
+                        "content": "You are a helpful research assistant. Provide detailed, factual information with specific numbers, statistics, and recent data where available."
                     },
                     {"role": "user", "content": query}
                 ],
                 "temperature": 0.2,
-                "max_tokens": 1000
+                "max_tokens": 800
             }
             
             try:
@@ -304,19 +361,36 @@ def call_perplexity_api(query):
                 if response.status_code == 200:
                     st.session_state.api_usage['perplexity_calls'] += 1
                     return response.json()
-                elif response.status_code == 400:
-                    # Model not available, try next one
-                    continue
-                else:
-                    # Other error, return immediately
-                    return {"error": f"API call failed with status {response.status_code}: {response.text}"}
                     
+                elif response.status_code == 400:
+                    # Parse error message
+                    try:
+                        error_data = response.json()
+                        error_msg = error_data.get('error', {}).get('message', 'Unknown error')
+                        last_error = f"Model {model_name}: {error_msg}"
+                    except:
+                        last_error = f"Model {model_name}: HTTP 400 - {response.text[:200]}"
+                    continue
+                    
+                elif response.status_code == 401:
+                    return {"error": "Invalid API key or authentication failed"}
+                    
+                elif response.status_code == 429:
+                    return {"error": "Rate limit exceeded. Please wait and try again."}
+                    
+                else:
+                    last_error = f"Model {model_name}: HTTP {response.status_code} - {response.text[:200]}"
+                    continue
+                    
+            except requests.exceptions.Timeout:
+                last_error = f"Model {model_name}: Request timed out"
+                continue
             except requests.exceptions.RequestException as e:
-                if model_name == models_to_try[-1]:  # Last model
-                    return {"error": f"Request failed: {str(e)}"}
+                last_error = f"Model {model_name}: Request failed - {str(e)}"
                 continue
         
-        return {"error": "All models failed or are unavailable"}
+        # If we get here, all models failed
+        return {"error": f"All models failed. Last error: {last_error}"}
     
     except Exception as e:
         return {"error": f"Exception occurred: {str(e)}"}
@@ -484,7 +558,7 @@ def research_missing_context(missing_context_items):
                 missing_info = item.get('missing_info', '') or item.get('description', '')
                 query = f"Latest data and statistics about {missing_info} {category} 2024"
             
-            # Research with Perplexity
+            # Try Perplexity first
             research_response = call_perplexity_api(query)
             
             if 'choices' in research_response and research_response['choices']:
@@ -498,19 +572,65 @@ def research_missing_context(missing_context_items):
                     'research_content': content,
                     'data_points': data_points,
                     'importance': item.get('importance', 'medium'),
-                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M')
+                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M'),
+                    'source': 'Perplexity AI'
                 })
             else:
+                # Fallback: Use Gemini to generate research suggestions
                 error_msg = research_response.get('error', 'Unknown error')
-                research_results.append({
-                    'original_query': query,
-                    'category': item.get('category', 'Unknown'),
-                    'missing_info': item.get('missing_info', '') or item.get('description', ''),
-                    'research_content': f"Error: {error_msg}",
-                    'data_points': [],
-                    'importance': item.get('importance', 'medium'),
-                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M')
-                })
+                
+                # Try to get research suggestions from Gemini instead
+                if model:
+                    try:
+                        fallback_prompt = f"""
+                        Research query: {query}
+                        
+                        Since I cannot access real-time data, provide:
+                        1. What specific data points would be most valuable for this query
+                        2. Typical ranges or expected values for this type of data
+                        3. Key sources where this information could be found
+                        4. Important metrics to look for
+                        
+                        Focus on actionable research guidance.
+                        """
+                        
+                        gemini_response = model.generate_content(fallback_prompt)
+                        st.session_state.api_usage['gemini_calls'] += 1
+                        
+                        fallback_content = f"Research guidance (Perplexity unavailable):\n\n{gemini_response.text}"
+                        
+                        research_results.append({
+                            'original_query': query,
+                            'category': item.get('category', 'Unknown'),
+                            'missing_info': item.get('missing_info', '') or item.get('description', ''),
+                            'research_content': fallback_content,
+                            'data_points': [],
+                            'importance': item.get('importance', 'medium'),
+                            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M'),
+                            'source': 'Gemini AI (Fallback)'
+                        })
+                    except Exception as gemini_error:
+                        research_results.append({
+                            'original_query': query,
+                            'category': item.get('category', 'Unknown'),
+                            'missing_info': item.get('missing_info', '') or item.get('description', ''),
+                            'research_content': f"Research needed: {query}\n\nBoth Perplexity and Gemini unavailable.\nPerplexity error: {error_msg}\nGemini error: {str(gemini_error)}",
+                            'data_points': [],
+                            'importance': item.get('importance', 'medium'),
+                            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M'),
+                            'source': 'Error'
+                        })
+                else:
+                    research_results.append({
+                        'original_query': query,
+                        'category': item.get('category', 'Unknown'),
+                        'missing_info': item.get('missing_info', '') or item.get('description', ''),
+                        'research_content': f"Research needed: {query}\n\nPerplexity API error: {error_msg}\nSuggestion: Please research this manually or check your API key.",
+                        'data_points': [],
+                        'importance': item.get('importance', 'medium'),
+                        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M'),
+                        'source': 'Manual Research Needed'
+                    })
             
             # Add delay to respect rate limits
             time.sleep(1)
@@ -523,7 +643,8 @@ def research_missing_context(missing_context_items):
                 'research_content': f"Error processing item: {str(e)}",
                 'data_points': [],
                 'importance': 'low',
-                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M')
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M'),
+                'source': 'Error'
             })
     
     return research_results
@@ -829,8 +950,13 @@ if st.session_state.missing_context_data:
     for i, result in enumerate(filtered_results):
         importance = result.get('importance', 'medium')
         emoji = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(importance, "🟡")
+        source = result.get('source', 'Unknown')
+        source_emoji = {"Perplexity AI": "🔍", "Gemini AI (Fallback)": "🤖", "Manual Research Needed": "📝", "Error": "❌"}.get(source, "❓")
         
-        with st.expander(f"{emoji} {result['category']}: {result['missing_info'][:80]}..."):
+        with st.expander(f"{emoji} {result['category']}: {result['missing_info'][:80]}... {source_emoji}"):
+            
+            # Show source
+            st.markdown(f"**📊 Source:** {source}")
             
             # Research query used
             st.markdown("**🔍 Research Query:**")
@@ -838,8 +964,12 @@ if st.session_state.missing_context_data:
             
             # Research findings
             st.markdown("**📋 Research Findings:**")
-            if 'Error:' in result['research_content']:
+            if 'Error:' in result['research_content'] or result.get('source') == 'Error':
                 st.error(result['research_content'])
+            elif result.get('source') == 'Manual Research Needed':
+                st.warning(result['research_content'])
+            elif result.get('source') == 'Gemini AI (Fallback)':
+                st.info(result['research_content'])
             else:
                 st.markdown(result['research_content'])
                 
@@ -860,7 +990,10 @@ if st.session_state.missing_context_data:
                         df = pd.DataFrame(data_for_table)
                         st.dataframe(df, hide_index=True, use_container_width=True)
                 else:
-                    st.info("No specific data points extracted from this research")
+                    if result.get('source') == 'Perplexity AI':
+                        st.info("No specific data points extracted from this research")
+                    else:
+                        st.info("Manual research required to find specific data points")
 
 # Export functionality
 if st.session_state.content_analysis or st.session_state.missing_context_data:
