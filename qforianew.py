@@ -5,11 +5,12 @@ import json
 import requests
 import time
 from datetime import datetime
-from bs4 import BeautifulSoup
+import PyPDF2
+import io
 
 # App config
 st.set_page_config(page_title="Qforia Research Platform", layout="wide")
-st.title("🔍 Qforia: Complete Research & Analysis Platform")
+st.title("MB Content Guide")
 
 # Initialize session states
 if 'fanout_results' not in st.session_state:
@@ -20,8 +21,8 @@ if 'research_results' not in st.session_state:
     st.session_state.research_results = {}
 if 'selected_queries' not in st.session_state:
     st.session_state.selected_queries = set()
-if 'url_analysis' not in st.session_state:
-    st.session_state.url_analysis = None
+if 'pdf_analysis' not in st.session_state:
+    st.session_state.pdf_analysis = None
 if 'enhanced_topics' not in st.session_state:
     st.session_state.enhanced_topics = []
 
@@ -68,58 +69,62 @@ def call_perplexity(query, system_prompt="Provide comprehensive, actionable insi
     except Exception as e:
         return {"error": f"Perplexity API error: {e}"}
 
-def scrape_url(url):
+def extract_pdf_text(uploaded_file):
+    """Extract text content from uploaded PDF file"""
     try:
-        if not url.startswith(('http://', 'https://')):
-            url = 'https://' + url
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124'}
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.content, 'html.parser')
+        pdf_reader = PyPDF2.PdfReader(uploaded_file)
+        text = ""
         
-        # Remove unwanted elements
-        for element in soup(['script', 'style', 'nav', 'footer']):
-            element.decompose()
+        for page_num in range(len(pdf_reader.pages)):
+            page = pdf_reader.pages[page_num]
+            text += page.extract_text() + "\n"
         
-        # Extract content
-        content = soup.find('article') or soup.find('main') or soup.find('body')
-        text = content.get_text(separator=' ', strip=True) if content else ""
+        if len(text.strip()) < 100:
+            return None, "PDF content too short or unreadable"
         
-        if len(text) < 100:
-            return None, "Content too short"
-        
-        title = soup.title.string.strip() if soup.title and soup.title.string else "No title"
-        return {'content': text[:8000], 'title': title, 'url': url}, None
+        # Limit text length for analysis
+        return text[:10000], None
     except Exception as e:
-        return None, f"Scraping error: {e}"
+        return None, f"PDF extraction error: {e}"
 
-def analyze_url_content(content, title):
+def analyze_pdf_content(content, filename):
+    """Analyze PDF content and extract keywords and key information"""
     if not model:
         return None, "Gemini not configured"
     
     try:
         prompt = f"""
-        Analyze this URL content and extract key information:
-        Title: {title}
+        Analyze this PDF content and extract key information with focus on specific keywords and topics:
+        
+        Filename: {filename}
         Content: {content}
 
-        Provide a comprehensive analysis in JSON format:
+        Provide a comprehensive analysis in JSON format with concise, specific keywords and topics:
         {{
+            "keywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5"],
             "main_topics": ["topic1", "topic2", "topic3"],
-            "key_points": ["point1", "point2", "point3"],
-            "content_type": "news|blog|research|commercial|educational",
-            "credibility_score": "high|medium|low",
+            "key_concepts": ["concept1", "concept2", "concept3"],
+            "content_type": "research|report|article|manual|guide|presentation",
+            "domain": "technology|business|science|education|healthcare|finance|other",
+            "credibility_indicators": ["indicator1", "indicator2"],
             "missing_context": [
-                {{"topic": "topic", "missing_info": "what's missing", "research_query": "specific query"}}
+                {{"topic": "specific topic", "missing_info": "what's missing", "research_query": "targeted query"}}
             ],
             "fact_check_items": [
-                {{"claim": "specific claim", "verification_query": "query to verify this"}}
+                {{"claim": "specific factual claim", "verification_query": "query to verify"}}
             ],
             "enhancement_opportunities": [
-                {{"area": "area to enhance", "suggested_research": "what to research"}}
-            ]
+                {{"area": "specific area", "suggested_research": "focused research query"}}
+            ],
+            "summary": "Brief 2-3 sentence summary of the document"
         }}
+        
+        Focus on:
+        - Extract specific keywords (1-3 words each), not long phrases
+        - Identify concrete topics, not abstract concepts
+        - Keep claims and opportunities specific and actionable
         """
+        
         response = model.generate_content(prompt)
         json_text = response.text.strip()
         
@@ -210,7 +215,7 @@ def generate_fanout(query, mode):
         return None
 
 # Main Tabs
-tab1, tab2, tab3, tab4 = st.tabs(["🎯 Query Research", "🌐 URL Analyzer", "✅ Fact Checker", "📊 Research Dashboard"])
+tab1, tab2, tab3, tab4 = st.tabs(["🎯 Query Research", "📄 PDF Analyzer", "✅ Fact Checker", "📊 Research Dashboard"])
 
 with tab1:
     st.header("🎯 Qforia Query Fan-Out Research")
@@ -221,7 +226,7 @@ with tab1:
         st.subheader("Enter Your Research Query")
         user_query = st.text_area(
             "What would you like to research?", 
-            value="What's the best electric SUV for driving up Mt. Rainier?",
+            value="Flats for Sale in Mumbai",
             height=100,
             help="Enter any topic you want to research comprehensively"
         )
@@ -368,66 +373,90 @@ with tab1:
                     st.rerun()
 
 with tab2:
-    st.header("🌐 URL Content Analyzer")
+    st.header("📄 PDF Document Analyzer")
     
     col1, col2 = st.columns([3, 1])
     
     with col1:
-        url = st.text_input("Enter URL to analyze:", placeholder="https://example.com/article")
+        uploaded_file = st.file_uploader(
+            "Upload PDF document for analysis or url pdf:", 
+            type=['pdf'],
+            help="Upload a PDF file to extract keywords, topics, and analyze content"
+        )
         
     with col2:
-        if st.button("🔍 Analyze URL", type="primary", use_container_width=True):
-            if not url:
-                st.warning("Please enter a URL")
+        if st.button("🔍 Analyze PDF", type="primary", use_container_width=True):
+            if not uploaded_file:
+                st.warning("Please upload a PDF file")
             elif not gemini_key:
                 st.warning("Please enter your Gemini API key")
             else:
-                with st.spinner("🌐 Scraping and analyzing URL content..."):
-                    scraped_data, error = scrape_url(url)
+                with st.spinner("📄 Extracting PDF content..."):
+                    pdf_text, error = extract_pdf_text(uploaded_file)
                     
-                if scraped_data:
-                    st.success("✅ Content scraped successfully!")
-                    st.write(f"**Title:** {scraped_data['title']}")
+                if pdf_text:
+                    st.success("✅ PDF content extracted successfully!")
                     
-                    with st.spinner("🤖 Analyzing content..."):
-                        analysis, error = analyze_url_content(scraped_data['content'], scraped_data['title'])
+                    with st.spinner("🤖 Analyzing content and extracting keywords..."):
+                        analysis, error = analyze_pdf_content(pdf_text, uploaded_file.name)
                     
                     if analysis:
-                        st.session_state.url_analysis = analysis
+                        st.session_state.pdf_analysis = analysis
                         st.success("✅ Analysis completed!")
                         st.rerun()
                     else:
                         st.error(f"Analysis failed: {error}")
                 else:
-                    st.error(f"Scraping failed: {error}")
+                    st.error(f"PDF extraction failed: {error}")
 
-    # Display URL analysis results
-    if st.session_state.url_analysis:
+    # Display PDF analysis results
+    if st.session_state.pdf_analysis:
         st.markdown("---")
-        analysis = st.session_state.url_analysis
+        analysis = st.session_state.pdf_analysis
         
         # Overview metrics
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("Content Type", analysis.get('content_type', 'Unknown').title())
         with col2:
-            st.metric("Credibility", analysis.get('credibility_score', 'Unknown').title())
+            st.metric("Domain", analysis.get('domain', 'Unknown').title())
         with col3:
-            st.metric("Topics Found", len(analysis.get('main_topics', [])))
+            st.metric("Keywords Found", len(analysis.get('keywords', [])))
         with col4:
             st.metric("Enhancement Ops", len(analysis.get('enhancement_opportunities', [])))
         
-        # Main topics
-        if analysis.get('main_topics'):
-            st.subheader("📝 Main Topics")
-            for topic in analysis['main_topics']:
-                st.write(f"• {topic}")
+        # Document Summary
+        if analysis.get('summary'):
+            st.subheader("📋 Document Summary")
+            st.info(analysis['summary'])
         
-        # Key points
-        if analysis.get('key_points'):
-            st.subheader("🎯 Key Points")
-            for point in analysis['key_points']:
-                st.write(f"• {point}")
+        # Keywords and Topics in columns
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if analysis.get('keywords'):
+                st.subheader("🔑 Keywords")
+                # Display keywords as tags
+                keywords_html = " ".join([f'<span style="background-color: #e1f5fe; padding: 4px 8px; margin: 2px; border-radius: 12px; font-size: 0.9em;">{keyword}</span>' for keyword in analysis['keywords']])
+                st.markdown(keywords_html, unsafe_allow_html=True)
+        
+        with col2:
+            if analysis.get('main_topics'):
+                st.subheader("📝 Main Topics")
+                for topic in analysis['main_topics']:
+                    st.write(f"• {topic}")
+        
+        # Key concepts
+        if analysis.get('key_concepts'):
+            st.subheader("🎯 Key Concepts")
+            concepts_html = " ".join([f'<span style="background-color: #f3e5f5; padding: 4px 8px; margin: 2px; border-radius: 12px; font-size: 0.9em;">{concept}</span>' for concept in analysis['key_concepts']])
+            st.markdown(concepts_html, unsafe_allow_html=True)
+        
+        # Credibility indicators
+        if analysis.get('credibility_indicators'):
+            st.subheader("✅ Credibility Indicators")
+            for indicator in analysis['credibility_indicators']:
+                st.write(f"• {indicator}")
         
         # Missing context & enhancement opportunities
         col1, col2 = st.columns(2)
@@ -478,12 +507,12 @@ with tab3:
             else:
                 st.warning("Please enter a claim to verify")
     
-    # Auto fact-checking from URL analysis
-    if st.session_state.url_analysis and st.session_state.url_analysis.get('fact_check_items'):
+    # Auto fact-checking from PDF analysis
+    if st.session_state.pdf_analysis and st.session_state.pdf_analysis.get('fact_check_items'):
         st.markdown("---")
         st.subheader("🤖 Auto-Detected Claims for Verification")
         
-        for item in st.session_state.url_analysis['fact_check_items']:
+        for item in st.session_state.pdf_analysis['fact_check_items']:
             with st.expander(f"📋 {item['claim']}", expanded=False):
                 if perplexity_key:
                     if st.button(f"Verify Claim", key=f"verify_{hash(item['claim'])}"):
@@ -544,7 +573,7 @@ with tab4:
                     st.caption(f"**Priority:** {data['priority']}")
                     st.caption(f"**Researched:** {data['timestamp']}")
     else:
-        st.info("No research results yet. Start by using the Query Research or URL Analyzer tabs.")
+        st.info("No research results yet. Start by using the Query Research or PDF Analyzer tabs.")
 
 # Clear all data button
 if st.sidebar.button("🗑️ Clear All Data"):
@@ -552,11 +581,11 @@ if st.sidebar.button("🗑️ Clear All Data"):
     st.session_state.generation_details = None
     st.session_state.research_results = {}
     st.session_state.selected_queries = set()
-    st.session_state.url_analysis = None
+    st.session_state.pdf_analysis = None
     st.session_state.enhanced_topics = []
     st.success("All data cleared!")
     st.rerun()
 
 # Footer
 st.markdown("---")
-st.markdown("**Qforia Complete Research Platform** - Query Fan-Out, URL Analysis, Fact Checking & Research Dashboard | *Powered by Gemini AI & Perplexity*")
+st.markdown("**Qforia Complete Research Platform** - Query Fan-Out, PDF Analysis, Fact Checking & Research Dashboard | *Powered by Gemini AI & Perplexity*")
